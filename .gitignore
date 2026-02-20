@@ -1,0 +1,31 @@
+# ===== Python virtual environments =====
+env/
+venv/
+.venv/
+ENV/
+virtualenv/
+
+# ===== Node environments =====
+node_modules/
+
+# ===== Python cache =====
+__pycache__/
+*.pyc
+*.pyo
+
+# ===== Django stuff =====
+db.sqlite3
+*.log
+media/
+
+# ===== Frontend build =====
+dist/
+build/
+
+# ===== OS junk =====
+.DS_Store
+Thumbs.db
+
+# ===== Secrets =====
+.env
+.env.*
