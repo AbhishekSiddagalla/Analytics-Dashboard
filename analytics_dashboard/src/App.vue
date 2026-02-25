@@ -1,8 +1,10 @@
 <script setup>
-import * as d3 from "d3";
-import crossfilter from "crossfilter2";
 import * as dc from "dc";
+import * as d3 from "d3";
+import cloud from "d3-cloud";
+import crossfilter from "crossfilter2";
 import "dc/dist/style/dc.css";
+import "dc/src/compat/d3v6";
 import { onMounted, ref } from "vue";
 import { fetchTradeDataset } from "./apiConnector";
 
@@ -170,95 +172,108 @@ onMounted(async () => {
   const tickerDim = ndx.dimension((d) => d.ticker);
   const tickerGroup = tickerDim.group().reduceCount();
   // wordCloud chart
-  function renderWordCloud(group) {
-    const data = group.all().filter((d) => d.value > 0);
-
+  function renderWordCloud() {
     const width = W("#ticker");
-    const height = 260;
-
-    const max = d3.max(data, (d) => d.value);
-    const sizeScale = d3.scaleLinear().domain([1, max]).range([14, 50]);
+    const height = 300;
 
     const container = d3.select("#ticker");
     container.selectAll("svg").remove();
 
-    const svg = container
-      .append("svg")
-      .attr("width", width)
-      .attr("height", height);
+    const data = tickerGroup.all().filter((d) => d.value > 0);
 
-    let x = 10;
-    let y = 40;
-    const lineHeight = 55;
+    if (!data.length) return;
+    const max = d3.max(data, (d) => d.value);
 
-    data.forEach((d) => {
-      const text = svg
+    const fontSize = d3.scaleLinear().domain([0, max]).range([15, 60]);
+
+    const layout = cloud()
+      .size([width, height])
+      .words(
+        data.map((d) => ({
+          text: d.key,
+          size: fontSize(d.value),
+          value: d.value,
+        })),
+      )
+      .padding(5)
+      .rotate(() => (Math.random() > 0.7 ? 90 : 0))
+      .font("Arial")
+      .fontSize((d) => d.size)
+      .on("end", draw);
+
+    layout.start();
+
+    function draw(words) {
+      const svg = container
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height)
+        .append("g")
+        .attr("transform", `translate(${width / 2}, ${height / 2})`);
+
+      svg
+        .selectAll("text")
+        .data(words)
+        .enter()
         .append("text")
-        .style("font-size", sizeScale(d.value) + "px")
-        .style("fill", d3.schemeCategory10[Math.floor(Math.random() * 10)])
+        .style("font-family", "Impact")
+        .style(
+          "fill",
+          () => d3.schemeCategory10[Math.floor(Math.random() * 10)],
+        )
         .style("cursor", "pointer")
-        .text(d.key)
-        .on("click", () => {
+        .style("font-size", (d) => d.size + "px")
+        .attr("text-anchor", "middle")
+        .attr(
+          "transform",
+          (d) => `translate(${d.x},${d.y}) rotate(${d.rotate})`,
+        )
+        .text((d) => d.text)
+        .on("click", (event, d) => {
           if (
             tickerDim.hasCurrentFilter() &&
-            tickerDim.currentFilter() === d.key
+            tickerDim.currentFilter() === d.text
           ) {
             tickerDim.filter(null);
           } else {
-            tickerDim.filter(d.key);
+            tickerDim.filter(d.text);
           }
+
           dc.redrawAll();
-        });
-
-      text.append("title").text(`${d.key}: ${d.value}`);
-
-      const box = text.node().getBBox();
-
-      if (x + box.width > width - 10) {
-        x = 10;
-        y += lineHeight;
-      }
-
-      text.attr("x", x).attr("y", y);
-
-      x += box.width + 12;
-    });
+        })
+        .append("title")
+        .text((d) => `${d.text}: ${d.value}`);
+    }
   }
 
   // 9. Data Table
-  // const tableDim = ndx.dimension((d) => d.trade_date);
+  const tableDim = ndx.dimension((d) => d.trade_date);
 
-  // const tcTable = dc.dataTable("#data-table");
+  const tcTable = dc.dataTable("#data-table");
 
-  // tcTable
-  //   .dimension(tableDim)
-  //   .section((d) => d3.timeFormat("%Y-%m-%d")(d.trade_date))
-  //   .size(10)
-  //   .columns([
-  //     "isin",
-  //     "cusip",
-  //     // (d) => d.isin,
-  //     // (d) => d.cusip,
-  //     // (d) => d.account_number,
-  //     // (d) => d.executing_broker,
-  //     // (d) => d.settlement_date,
-  //     // (d) => d.price,
-  //     // (d) => d.quantity,
-  //     // (d) => d.comm_amount,
-  //     // (d) => d.net_amount,
-  //   ])
-  //   .sortBy((d) => d.settlement_date)
-  //   .on("renderlet", function (table) {
-  //     table.selectAll(".dc-table-group").classed("info", true);
-  //   });
+  tcTable
+    .dimension(tableDim)
+    .group(() => "")
+    .size(50)
+    .columns([
+      "isin",
+      "cusip",
+      "account_number",
+      "executing_broker",
+      "settlement_date",
+      "price",
+      "quantity",
+      "comm_amount",
+      "net_amount",
+    ])
+    .sortBy((d) => d.settlement_date)
+    .order(d3.ascending);
 
   dc.renderAll();
-  renderWordCloud(tickerGroup);
+  renderWordCloud();
 
   dc.chartRegistry.list().forEach((chart) => {
-    chart.on("filtered", () => {
-      renderWordCloud(tickerGroup);
-    });
+    chart.on("filtered", renderWordCloud);
   });
   attachReset(sideRow, "#side-reset");
   attachReset(optionRow, "#option-reset");
@@ -270,82 +285,253 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="p-3">
-    <h2 class="text-lg font-semibold mb-2">
-      Dashboard <span class="ml-4 text-sm">Trade Date: {{ tradeDate }}</span>
+  <div class="dashboard-container">
+    <h2 class="dashboard-title">
+      Dashboard
+      <span class="trade-date">Trade Date: {{ tradeDate }}</span>
     </h2>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      <div class="bg-white shadow rounded p-2 border-2 border-black">
-        <h3 class="text-sm font-semibold mb-1">Asset Wise</h3>
+    <div class="dashboard-grid">
+      <div class="card">
+        <h3>Asset Wise</h3>
         <div id="asset-type-wise"></div>
       </div>
 
-      <div class="bg-white shadow rounded p-2 border-2 border-black">
-        <h3 class="text-sm font-semibold mb-1">
+      <div class="card">
+        <h3>
           Side Wise
-          <a id="side-reset" class="text-xs text-blue-600 invisible">reset</a>
+          <a
+            id="side-reset"
+            class="reset-link"
+            href="#"
+            onclick="
+              event.preventDefault();
+              sideRow.filterAll();
+              dc.redrawAll();
+              return false;
+            "
+            style="visibility: hidden"
+          >
+            reset
+          </a>
         </h3>
         <div id="side-type-wise"></div>
       </div>
 
-      <div class="bg-white shadow rounded p-2 border-2 border-black">
-        <h3 class="text-sm font-semibold mb-1">
+      <div class="card">
+        <h3>
           Option Wise
-          <a id="option-reset" class="text-xs text-blue-600 invisible">reset</a>
+          <a
+            id="option-reset"
+            class="reset-link"
+            href="#"
+            onclick="
+              event.preventDefault();
+              optionRow.filterAll();
+              dc.redrawAll();
+              return false;
+            "
+            style="visibility: hidden"
+            >reset</a
+          >
         </h3>
         <div id="option-type-wise"></div>
       </div>
 
-      <div class="bg-white shadow rounded p-2 border-2 border-black">
-        <h3 class="text-sm font-semibold mb-1">
+      <div class="card">
+        <h3>
           Currency Wise
-          <a id="currency-reset" class="text-xs text-blue-600 invisible"
+          <a
+            id="currency-reset"
+            class="reset-link"
+            href="#"
+            onclick="
+              event.preventDefault();
+              currencyRow.filterAll();
+              dc.redrawAll();
+              return false;
+            "
+            style="visibility: hidden"
             >reset</a
           >
         </h3>
         <div id="currency-type-wise"></div>
       </div>
 
-      <div class="bg-white shadow rounded p-2 border-2 border-black">
-        <h3 class="text-sm font-semibold mb-1">
+      <div class="card">
+        <h3>
           Record Type Wise
-          <a id="record-type-reset" class="text-xs text-blue-600 invisible"
+          <a
+            id="record-type-reset"
+            class="reset-link"
+            href="#"
+            onclick="
+              event.preventDefault();
+              recordTypeRow.filterAll();
+              dc.redrawAll();
+              return false;
+            "
+            style="visibility: hidden"
             >reset</a
           >
         </h3>
         <div id="record-type-wise"></div>
       </div>
 
-      <div class="bg-white shadow rounded p-2 border-2 border-black">
-        <h3 class="text-sm font-semibold mb-1">
+      <div class="card">
+        <h3>
           PB Map Wise
-          <a id="pb-map-reset" class="text-xs text-blue-600 invisible">reset</a>
+          <a
+            id="pb-map-reset"
+            class="reset-link"
+            href="#"
+            onclick="
+              event.preventDefault();
+              pbMapRow.filterAll();
+              dc.redrawAll();
+              return false;
+            "
+            style="visibility: hidden"
+            >reset</a
+          >
         </h3>
         <div id="pb-map-wise"></div>
       </div>
 
-      <div
-        class="bg-white shadow rounded p-2 border-2 border-black lg:col-span-2"
-      >
-        <h3 class="text-sm font-semibold mb-1">
+      <div class="card">
+        <h3>
           PM Wise
-          <a id="pm-reset" class="text-xs text-blue-600 invisible">reset</a>
+          <a
+            id="pm-reset"
+            class="reset-link"
+            href="#"
+            onclick="
+              event.preventDefault();
+              pmRow.filterAll();
+              dc.redrawAll();
+              return false;
+            "
+            style="visibility: hidden"
+            >reset</a
+          >
         </h3>
         <div id="pm-wise"></div>
       </div>
 
-      <div class="bg-white shadow rounded p-2 border-2 border-black">
-        <h3 class="text-sm font-semibold mb-1">Ticker Wise</h3>
+      <div class="card span-2">
+        <h3>Ticker Wise</h3>
         <div id="ticker"></div>
       </div>
 
-      <div
-        class="bg-white shadow rounded p-2 border-2 border-black col-span-1 md:col-span-2 lg:col-span-3"
-      >
-        <h3 class="text-sm font-semibold mb-1">Data Table</h3>
+      <div class="card span-3">
+        <h3>Data Table</h3>
         <div id="data-table"></div>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.dashboard-container {
+  padding: 16px;
+  background-color: #f5f5f5;
+}
+
+.dashboard-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.trade-date {
+  font-size: 14px;
+  margin-left: 16px;
+  font-weight: 400;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.card {
+  background-color: white;
+  padding: 10px;
+  border: 2px solid black;
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.card h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.span-2 {
+  grid-column: span 2;
+}
+
+.span-3 {
+  grid-column: span 3;
+}
+
+.reset-link {
+  font-size: 12px;
+  color: blue;
+  margin-left: 8px;
+  visibility: hidden;
+  cursor: pointer;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .span-2 {
+    grid-column: span 2;
+  }
+
+  .span-3 {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .span-2,
+  .span-3 {
+    grid-column: span 1;
+  }
+}
+
+:deep(#data-table) {
+  width: 100%;
+  overflow-x: auto;
+}
+
+:deep(#data-table table) {
+  width: 100% !important;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+:deep(#data-table th),
+:deep(#data-table td) {
+  width: calc(100% / 9);
+  border: 1px solid #ccc;
+  padding: 6px;
+  text-align: left;
+  word-break: break-word;
+}
+
+:deep(#data-table th) {
+  background-color: #f2f2f2;
+  font-weight: 600;
+}
+</style>

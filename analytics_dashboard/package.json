@@ -11,8 +11,8 @@
   "dependencies": {
     "crossfilter2": "^1.5.4",
     "d3": "^6.7.0",
+    "d3-cloud": "^1.2.8",
     "d3-collection": "^1.0.7",
-    "d3-selection": "^2.0.0",
     "dc": "^4.2.7",
     "vue": "^3.5.28"
   },
