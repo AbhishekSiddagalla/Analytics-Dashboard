@@ -11,12 +11,14 @@ import { fetchTradeDataset } from "./apiConnector";
 let assetPie, sideRow, optionRow, currencyRow, recordTypeRow, pbMapRow, pmRow;
 
 const tradeDate = ref("");
+const selectedTradeDate = ref("");
 
 onMounted(async () => {
   window.dc = dc;
   const dataset = await fetchTradeDataset();
 
   tradeDate.value = dataset[0]?.trade_date || "N/A";
+  selectedTradeDate.value = tradeDate.value;
 
   const ndx = crossfilter(dataset);
 
@@ -261,7 +263,7 @@ onMounted(async () => {
 
   tcTable
     .dimension(tableDim)
-    .group((d) => d.trade_date)
+    .section((d) => d.trade_date)
     .size(50)
     .columns([
       { label: "isin", format: (d) => (d.isin ? d.isin : "N/A") },
@@ -331,6 +333,7 @@ onMounted(async () => {
 
       <div class="dashboard-right">
         <select v-model="selectedTradeDate" class="dashboard-dropdown">
+          <option disabled value="">Select Trade Date</option>
           <option :value="tradeDate">
             {{ tradeDate }}
           </option>
