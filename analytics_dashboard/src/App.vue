@@ -5,27 +5,42 @@ import cloud from "d3-cloud";
 import crossfilter from "crossfilter2";
 import "dc/dist/style/dc.css";
 import "dc/src/compat/d3v6";
-import { onMounted, ref } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { fetchTradeDataset } from "./apiConnector";
 
 let assetPie, sideRow, optionRow, currencyRow, recordTypeRow, pbMapRow, pmRow;
+let tickerDim;
+let ndx;
 
 const tradeDate = ref("");
-const selectedTradeDate = ref("");
+
+const fromDate = ref("");
+const toDate = ref("");
+const useRange = ref(false);
+
+//default 'to' date
+function getYesterdayDate() {
+  const date = new Date();
+  date.setDate(date.getDate() - 1);
+  return date.toISOString().split("T")[0];
+}
 
 onMounted(async () => {
   window.dc = dc;
-  const dataset = await fetchTradeDataset();
+
+  toDate.value = getYesterdayDate();
+
+  let dataset = await fetchTradeDataset(null, toDate.value);
 
   tradeDate.value = dataset[0]?.trade_date || "N/A";
-  selectedTradeDate.value = tradeDate.value;
 
-  const ndx = crossfilter(dataset);
+  // selectedTradeDate.value = tradeDate.value;
+
+  ndx = crossfilter(dataset);
 
   const W = (id) => {
     const el = document.querySelector(id);
     if (!el || !el.parentElement) return 250;
-
     return el.parentElement.getBoundingClientRect().width - 20;
   };
 
@@ -57,12 +72,9 @@ onMounted(async () => {
     .width(W("#side-type-wise"))
     .height(220)
     .margins({ top: 10, right: 10, bottom: 20, left: 50 })
-
     .dimension(sideDim)
     .group(sideGroup)
-
     .elasticX(true)
-    .ordinalColors(["#4CAF50", "#F44336"])
 
     .label((d) => `${d.key} (${d.value})`)
     .title((d) => `${d.key}: ${d.value}`);
@@ -84,7 +96,6 @@ onMounted(async () => {
     .group(optionGroup)
 
     .elasticX(true)
-    .ordinalColors(["#4CAF50", "#F44336"])
 
     .label((d) => `${d.key} (${d.value})`)
     .title((d) => `${d.key}: ${d.value}`);
@@ -104,9 +115,7 @@ onMounted(async () => {
 
     .dimension(currencyDim)
     .group(currencyGroup)
-
     .elasticX(true)
-    .ordinalColors(["#4CAF50", "#F44336"])
 
     .label((d) => `${d.key} (${d.value})`)
     .title((d) => `${d.key}: ${d.value}`);
@@ -126,9 +135,7 @@ onMounted(async () => {
 
     .dimension(recordTypeDim)
     .group(recordTypeGroup)
-
     .elasticX(true)
-    .ordinalColors(["#4CAF50", "#F44336"])
 
     .label((d) => `${d.key} (${d.value})`)
     .title((d) => `${d.key}: ${d.value}`);
@@ -148,9 +155,7 @@ onMounted(async () => {
 
     .dimension(pbMapDim)
     .group(pbMapGroup)
-
     .elasticX(true)
-    .ordinalColors(["#4CAF50", "#F44336"])
 
     .label((d) => `${d.key} (${d.value})`)
     .title((d) => `${d.key}: ${d.value}`);
@@ -170,16 +175,14 @@ onMounted(async () => {
 
     .dimension(pmDim)
     .group(pmGroup)
-
     .elasticX(true)
-    .ordinalColors(["#4CAF50", "#F44336"])
 
     .label((d) => `${d.key} (${d.value})`)
     .renderTitle(true)
     .title((d) => `${d.key}: ${d.value}`);
 
   // 8. ticker wise trade capture
-  const tickerDim = ndx.dimension((d) => d.ticker);
+  tickerDim = ndx.dimension((d) => d.ticker);
   const tickerGroup = tickerDim.group().reduceCount();
 
   window.tickerDim = tickerDim;
@@ -243,12 +246,31 @@ onMounted(async () => {
         .text((d) => d.text)
 
         .on("click", (event, d) => {
-          tickerDim.filter(
-            tickerDim.currentFilter() === d.text ? null : d.text,
-          );
+          if (
+            tickerDim.hasCurrentFilter() &&
+            tickerDim.currentFilter() === d.text
+          ) {
+            tickerDim.filter(null);
+          } else {
+            tickerDim.filter(d.text);
+          }
+
           dc.redrawAll();
-          // renderWordCloud();
+
+          const tickerReset = document.getElementById("ticker-reset");
+          tickerReset.style.visibility = tickerDim.hasCurrentFilter()
+            ? "visible"
+            : "hidden";
+
+          // handle reset-all visibility
+          const anyFilterApplied =
+            dc.chartRegistry.list().some((c) => c.hasFilter()) ||
+            tickerDim.hasCurrentFilter();
+
+          document.getElementById("reset-all").style.visibility =
+            anyFilterApplied ? "visible" : "hidden";
         })
+
         .append("title")
         .text((d) => `${d.text}: ${d.value}`);
     }
@@ -286,6 +308,40 @@ onMounted(async () => {
   dc.renderAll();
   renderWordCloud();
 
+  // Reset function for word cloud
+  function resetWordCloud() {
+    tickerDim.filterAll();
+    dc.redrawAll();
+    renderWordCloud();
+
+    document.getElementById("ticker-reset").style.visibility = "hidden";
+
+    const anyFilterApplied =
+      dc.chartRegistry.list().some((c) => c.hasFilter()) ||
+      tickerDim.hasCurrentFilter();
+
+    document.getElementById("reset-all").style.visibility = anyFilterApplied
+      ? "visible"
+      : "hidden";
+  }
+
+  window.resetWordCloud = resetWordCloud;
+
+  // Reset function for all charts
+  function resetAllCharts() {
+    dc.filterAll();
+    tickerDim.filterAll();
+
+    dc.renderAll();
+    renderWordCloud();
+
+    document.querySelectorAll(".reset").forEach((el) => {
+      el.style.visibility = "hidden";
+    });
+  }
+
+  window.resetAllCharts = resetAllCharts;
+
   dc.chartRegistry.list().forEach((chart) => {
     chart.on("filtered", function (chart) {
       renderWordCloud();
@@ -296,7 +352,7 @@ onMounted(async () => {
         element.style.visibility = condition ? "visible" : "hidden";
       };
 
-      // Individual Reset
+      // Individual Chart Reset
       const individualReset = chart
         .root()
         .node()
@@ -304,20 +360,37 @@ onMounted(async () => {
 
       toggleVisibility(individualReset, chart.hasFilter());
 
-      // Ticker Reset
-      const tickerResetLink = document.getElementById("ticker-reset");
-      toggleVisibility(tickerResetLink, tickerDim.hasCurrentFilter());
-
-      // Reset All
+      // Reset All Charts
       const resetAllLink = document.getElementById("reset-all");
 
-      const anyFilterApplied = dc.chartRegistry
-        .list()
-        .some((c) => c.hasFilter());
+      const anyFilterApplied =
+        dc.chartRegistry.list().some((c) => c.hasFilter()) ||
+        tickerDim.hasCurrentFilter();
 
       toggleVisibility(resetAllLink, anyFilterApplied);
     });
   });
+});
+
+watch([fromDate, toDate, useRange], async () => {
+  if (!toDate.value) return;
+
+  let dataset;
+
+  if (useRange.value) {
+    dataset = await fetchTradeDataset(fromDate.value, toDate.value);
+  } else {
+    dataset = await fetchTradeDataset(null, toDate.value);
+  }
+
+  tradeDate.value = dataset[0]?.trade_date || "N/A";
+
+  if (!ndx) return;
+
+  ndx.remove();
+  ndx.add(dataset);
+
+  dc.redrawAll();
 });
 </script>
 
@@ -327,17 +400,26 @@ onMounted(async () => {
       <div class="dashboard-left">
         <h2 class="dashboard-title">
           Dashboard
-          <span class="trade-date"> Trade Date: {{ tradeDate }} </span>
+          <span class="trade-date">{{ fromDate }} - {{ toDate }} </span>
         </h2>
       </div>
 
-      <div class="dashboard-right">
-        <select v-model="selectedTradeDate" class="dashboard-dropdown">
-          <option disabled value="">Select Trade Date</option>
-          <option :value="tradeDate">
-            {{ tradeDate }}
-          </option>
-        </select>
+      <!-- Date range selector -->
+      <div class="dashboard-right date-range-container">
+        <label v-if="useRange">
+          From:
+          <input type="date" v-model="fromDate" class="date-input" />
+        </label>
+
+        <label>
+          To:
+          <input type="date" v-model="toDate" class="date-input" />
+        </label>
+
+        <label class="range-checkbox">
+          <input type="checkbox" v-model="useRange" />
+          Range
+        </label>
       </div>
     </div>
     <div class="dashboard-grid">
@@ -437,7 +519,7 @@ onMounted(async () => {
           <a
             id="ticker-reset"
             class="reset"
-            href="javascript:tickerDim.filterAll();dc.redrawAll();renderWordCloud();"
+            href="javascript:resetWordCloud();"
             style="visibility: hidden"
             >reset</a
           >
@@ -451,7 +533,7 @@ onMounted(async () => {
           <a
             id="reset-all"
             class="reset"
-            href="javascript:dc.filterAll();dc.renderAll();"
+            href="javascript:resetAllCharts();"
             style="visibility: hidden"
             >Reset All</a
           >
@@ -483,10 +565,24 @@ onMounted(async () => {
   align-items: center;
 }
 
-.dashboard-right {
+.date-range-container {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.date-input {
+  padding: 5px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.range-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
 }
 
 .dashboard-title {
